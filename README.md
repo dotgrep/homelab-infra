@@ -2,48 +2,31 @@
 
 ```mermaid
 flowchart TD
-    %% Edge & Network Infrastructure
-    WAN[🌐 WAN / Fiber Internet] --> EdgeRouter[MikroTik RouterOS Edge Router]
-    EdgeRouter --> CoreSwitch[Managed Switch & 24-Port Patch Panel]
+    %% External WAN Ingress
+    WAN[🌐 WAN / ISP Modem] --> CoreSwitch
 
-    %% Rack Core Hardware
+    %% Physical Rack Infrastructure
     subgraph Network_Rack [ Homelab Rack Infrastructure ]
-        CoreSwitch --> PVEHost1[Proxmox VE Host / Compute Node 1]
-        CoreSwitch --> PVEHost2[Proxmox VE Host / Compute Node 2]
-        CoreSwitch --> NASNode[Storage Server / ZimaOS NAS]
+        CoreSwitch[Netgear M4100 L2+ Managed Switch]
+        
+        CoreSwitch --> Host1[Proxmox VE Host 1<br/>OPNsense Virtualized Gateway]
+        CoreSwitch --> Host2[Proxmox VE Host 2<br/>Vpn & Edge Access Node]
+        CoreSwitch --> Host3[Proxmox VE Host 3<br/>Storage Server & Sysadmin Lab]
     end
-
-    %% Access Layer
-    CoreSwitch --> AP[Wireless Access Points]
 ```
----
+How the Setup Works
+I built this homelab to keep network traffic strictly separated while getting the most out of virtualized hardware. Here is how each part operates:
 
-### Hardware Specifications
+Hardware WAN Isolation (Netgear M4100 Switch): Fiber internet comes directly into Port 25 on the Netgear M4100 switch. Port 25 sits on its own isolated VLAN (VLAN 99) with every unused port disabled so raw internet traffic can't leak into the local network. It passes out of Port 26 over a tagged 802.1Q trunk straight into the firewall host.
 
-| Component | Role | Function & Hardware Details |
-| :--- | :--- | :--- |
-| **Edge Router** | Gateway / Firewall | MikroTik RouterOS running edge routing, static lease mapping, and custom firewall rules. |
-| **Switching** | Core Switching | Netgear M4100 Managed Layer 2/3 Switch + 24-Port Patch Panel for VLAN distribution and trunking. |
-| **Hypervisors** | Compute Nodes | Dual Proxmox VE hosts running virtualized Debian/Rocky Linux VMs, LXCs, and Docker container stacks. |
-| **Storage Node** | NAS / Storage | ZimaOS NAS server managing storage pools, localized apps, and network shares. |
-| **Access Layer** | Wireless APs | Plasma Cloud PAX1800AX access points configured for local network coverage and VLAN SSID tagging. |
----
+Virtualized Firewall & Single-NIC Routing (Proxmox Host 1): Instead of using a dedicated physical router, I run OPNsense in a VM on a dedicated mini PC. Using Proxmox's vmbr0 bridge and VLAN tags, I split one physical network card into two virtual interfaces—one for WAN (VLAN 99) and one for untagged LAN. OPNsense treats them like two separate physical network cards, handling all routing, NAT, and firewall rules.
 
-### Network Architecture & Segmentation
+Reverse Proxy & Remote Access (Proxmox Host 2): This node handles inbound access. It runs an Nginx LXC for reverse proxying and SSL certs, along with a Tailscale LXC for secure, zero-trust remote access back into the lab. I also use this host as a staging ground to test new Docker/LXC setups before deploying them.
 
-| VLAN ID | Network Name | Subnet | Purpose & Security Scope |
-| :--- | :--- | :--- | :--- |
-| **VLAN 10** | Management & Core | `172.30.0.0/23` | Proxmox hypervisors, switch management, RouterOS admin, core servers, compute LXCs, and local DNS |
-| **Native / Untagged** | Trusted LAN | `192.168.8.0/24` | Primary workstations, laptops, and trusted personal LAN devices |
-| **VLAN 20** | IoT Devices | `192.168.88.0/24` | Isolated smart home and wireless IoT hardware managed via Plasma Cloud APs |
-| **VLAN 30** | Guest Network | `192.168.188.0/27` | Restricted guest wireless access and isolated transient devices |
+Storage, Services & Sysadmin Lab (Proxmox Host 3): This host handles heavy compute and core infrastructure:
 
-### Active Hosted Services
+Storage NAS VM: Has direct disk passthrough for raw drive access and fast file sharing.
 
-| Category | Service | Container / Host | Description |
-| :--- | :--- | :--- | :--- |
-| **Networking & Ingress** | Nginx | Docker VM | Edge reverse proxy with automated SSL certificate renewal |
-| **Access & Security** | Tailscale | LXC Container | Zero-trust overlay mesh network for remote node access subnet router | 
-| **Infrastructure Ops** | Uptime Kuma | Docker VM | Live ping monitoring, service uptime tracking, and alerting |
-| **Data Management** | ZimaOS / Samba | NAS Host | Centralized storage pools and LAN network shares |
-| **Security & Secrets** | Vaultwarden | Docker VM | Self-hosted encrypted password vault |
+Docker Engine (Debian VM): Runs all production container stacks.
+
+Enterprise Lab (Rocky Linux & Windows Server VMs): A Rocky Linux VM for RHEL-family CLI administration practice, and a Windows Server VM running Active Directory, Group Policy (GPO), and RDP to mirror enterprise IT environments.
